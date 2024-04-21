@@ -39,7 +39,7 @@ async function getVids(
 ): Promise<Bumper[]>;
 async function getVids(
   dir: string,
-  opts: { withDuration: false | undefined } | undefined
+  opts?: { withDuration: false }
 ): Promise<string[]>;
 async function getVids(
   dir: string,
@@ -97,11 +97,6 @@ function buildBumperGetter(bumpers: Bumper[], resetThreshold: number) {
   };
 }
 
-/**
- *
- * @param {string[][]} playlists
- * @returns
- */
 async function addBumpers(playlists: string[][]) {
   const argv = getArgs();
   if (!argv.bumpersDir) {
@@ -112,7 +107,6 @@ async function addBumpers(playlists: string[][]) {
   const betweenDuration = 10 * 60;
   const tolerance = 2.5 * 60;
 
-  // /** @type Array<{ name: string, duration: number }> */
   const bumpers = shuffle(
     await getVids(argv.bumpersDir, { withDuration: true })
   );
@@ -133,8 +127,10 @@ async function addBumpers(playlists: string[][]) {
 async function main() {
   const argv = getArgs();
 
-  /** @type string[][] */
-  const dirVids: string[][] = await Promise.all(argv._.map(getVids));
+  const dirVids: string[][] = await Promise.all(
+    // @ts-expect-error
+    argv._.map((dir) => getVids(dir))
+  );
 
   // TODO: set max # of concurrent series & stripe them
   const playlists = minZip(...dirVids);

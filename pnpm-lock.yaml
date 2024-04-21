@@ -17,7 +17,7 @@ dependencies:
 
 devDependencies:
   '@types/node':
-    specifier: '16'
+    specifier: ^16.18.96
     version: 16.18.96
   '@types/yargs':
     specifier: ^17.0.32

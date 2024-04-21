@@ -1,6 +1,5 @@
 #!/usr/bin/env node
 import { execa } from "execa";
-import fs from "fs/promises";
 import { Dirent } from "fs";
 import * as path from "path";
 import { fileTypeFromFile } from "file-type";
@@ -8,10 +7,10 @@ import yargs from "yargs/yargs";
 import { hideBin } from "yargs/helpers";
 import { AsyncLocalStorage } from "async_hooks";
 
-import { getBumpers } from "./bumpers.mjs";
+import { getBumpers, Bumper } from "./bumpers.mjs";
 import { dirMap, minZip, shuffle } from "./util.mjs";
 
-const getDuration = async (path) => {
+const getDuration = async (path: string) => {
   const { stdout } = await execa("ffprobe", [
     "-v",
     "quiet",
@@ -25,44 +24,46 @@ const getDuration = async (path) => {
   return parseFloat(jsonOutput?.format?.duration);
 };
 
-/**
- * @param {string} path
- * @param {Dirent} dirent
- * @returns {Promise<boolean>}
- */
-const getIsVideoFile = async (path, dirent) => {
+const getIsVideoFile = async (path: string, dirent: Dirent) => {
   if (dirent.isFile()) {
     const result = await fileTypeFromFile(path);
-    return result?.mime.startsWith("video");
+    return result?.mime.startsWith("video") ?? false;
   } else {
     return false;
   }
 };
 
-/**
- * @param {string} dir
- * @returns {Promise<Array<string>>}
- */
-async function getVids(dir, { withDuration = false } = {}) {
-  return (
-    await dirMap(dir, async (d) => {
-      const fullPath = path.resolve(dir, d.name);
-      if (await getIsVideoFile(fullPath, d)) {
-        if (withDuration) {
-          return {
-            name: d.name,
-            duration: await getDuration(fullPath),
-          };
-        }
-        return d.name;
+async function getVids(
+  dir: string,
+  opts: { withDuration: true }
+): Promise<Bumper[]>;
+async function getVids(
+  dir: string,
+  opts: { withDuration: false | undefined } | undefined
+): Promise<string[]>;
+async function getVids(
+  dir: string,
+  { withDuration = false } = {}
+): Promise<Array<Bumper | string>> {
+  const files = await dirMap(dir, async (d) => {
+    const fullPath = path.resolve(dir, d.name);
+    if (await getIsVideoFile(fullPath, d)) {
+      if (withDuration) {
+        return {
+          name: fullPath,
+          duration: await getDuration(fullPath),
+        };
       }
-    })
-  ).filter((x) => x !== undefined);
+      return fullPath;
+    }
+  });
+
+  return files.filter((x): x is Bumper | string => x !== undefined);
 }
 
-function buildBumperGetter(bumpers, resetThreshold) {
+function buildBumperGetter(bumpers: Bumper[], resetThreshold: number) {
   let localBumpers = shuffle(bumpers);
-  const usedSet = new Set();
+  const usedSet = new Set<Bumper>();
 
   const bumpersDuration = localBumpers.reduce(
     (acc, val) => acc + val.duration,
@@ -87,7 +88,7 @@ function buildBumperGetter(bumpers, resetThreshold) {
     }
   };
 
-  return (duration, tolerance) => {
+  return (duration: number, tolerance: number) => {
     try {
       return getBumpers(localBumpers, usedSet, duration, tolerance);
     } finally {
@@ -101,7 +102,7 @@ function buildBumperGetter(bumpers, resetThreshold) {
  * @param {string[][]} playlists
  * @returns
  */
-async function addBumpers(playlists) {
+async function addBumpers(playlists: string[][]) {
   const argv = getArgs();
   if (!argv.bumpersDir) {
     return playlists;
@@ -111,7 +112,7 @@ async function addBumpers(playlists) {
   const betweenDuration = 10 * 60;
   const tolerance = 2.5 * 60;
 
-  /** @type Array<{ name: string, duration: number }> */
+  // /** @type Array<{ name: string, duration: number }> */
   const bumpers = shuffle(
     await getVids(argv.bumpersDir, { withDuration: true })
   );
@@ -133,7 +134,7 @@ async function main() {
   const argv = getArgs();
 
   /** @type string[][] */
-  const dirVids = await Promise.all(argv._.map(getVids));
+  const dirVids: string[][] = await Promise.all(argv._.map(getVids));
 
   // TODO: set max # of concurrent series & stripe them
   const playlists = minZip(...dirVids);
@@ -148,7 +149,7 @@ async function main() {
   );
 }
 
-let argsContext = new AsyncLocalStorage();
+let argsContext = new AsyncLocalStorage<ReturnType<typeof parseArgs>>();
 
 function parseArgs() {
   return yargs(hideBin(process.argv))
@@ -159,8 +160,13 @@ function parseArgs() {
     .parseSync();
 }
 
-function getArgs() {
-  return argsContext.getStore();
+function getArgs(): ReturnType<typeof parseArgs> {
+  const store = argsContext.getStore();
+  if (!store) {
+    throw new Error("No args in store");
+  } else {
+    return store;
+  }
 }
 
 argsContext.run(parseArgs(), () => main().catch(console.error));
